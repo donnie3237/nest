@@ -8,7 +8,7 @@ RUN npm install -g pnpm
 
 # Copy package.json and pnpm-lock.yaml to install dependencies
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod=false
+RUN pnpm install
 
 # Copy the rest of the application source code
 COPY . .
