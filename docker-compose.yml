@@ -48,7 +48,6 @@ services:
     depends_on:
       - rabbitmq
       - redis
-      - postgres # Uncomment ถ้า Gateway เชื่อมต่อ DB
     restart: unless-stopped
     
   # === User Service (Worker) ===
@@ -70,11 +69,9 @@ services:
     depends_on:
       - rabbitmq
       - redis
-      - postgres
     restart: unless-stopped
 
 volumes:
   rabbitmq_data:
   rabbitmq_logs:
   redis_data:
-  postgres_data: # Uncomment ถ้าใช้ Postgres
