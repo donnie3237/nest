@@ -1,0 +1,83 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: rabbitmq_host
+    container_name: my-rabbit
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: myuser
+      RABBITMQ_DEFAULT_PASS: mypassword
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_logs:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:latest
+    hostname: redis_host
+    container_name: my-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: my-gateway
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./gateway/.env # <--- โหลด .env ในโฟลเดอร์ gateway
+    environment:
+      # ตัวแปรเหล่านี้อ้างอิงถึง Hostname ใน Docker Network
+      # และตัวแปร HTTP_PORT ที่ใช้ในการ map port ของ container
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASSWORD:-mypassword}@rabbitmq_host:5672 # <--- User/Pass สามารถมาจาก .env หลักได้
+      REDIS_HOST: redis_host
+      HTTP_PORT: 3000 # App ภายใน Container จะฟัง Port นี้
+      # DB_HOST: postgres_host # Uncomment ถ้า Gateway เชื่อมต่อ DB
+    depends_on:
+      - rabbitmq
+      - redis
+      - postgres # Uncomment ถ้า Gateway เชื่อมต่อ DB
+    restart: unless-stopped
+    
+  # === User Service (Worker) ===
+  user_service:
+    build:
+      context: ./user # Assume your User Service is in 'user' directory
+      dockerfile: Dockerfile
+    container_name: my-user-service
+    ports:
+      - "3001:3001" # ถ้า User Service มี HTTP API ของตัวเอง
+    env_file:
+      - .env # <--- โหลด .env ในโฟลเดอร์ user
+    environment:
+      # ตัวแปรเหล่านี้อ้างอิงถึง Hostname ใน Docker Network
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASSWORD:-mypassword}@rabbitmq_host:5672
+      REDIS_HOST: redis_host
+      DB_HOST: postgres_host # <--- อ้างอิง Hostname ของ Postgres
+      HTTP_PORT: 3001 # App ภายใน Container จะฟัง Port นี้
+    depends_on:
+      - rabbitmq
+      - redis
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+  rabbitmq_logs:
+  redis_data:
+  postgres_data: # Uncomment ถ้าใช้ Postgres
