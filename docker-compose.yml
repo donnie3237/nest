@@ -1,6 +1,3 @@
-# docker-compose.yml
-version: '3.8'
-
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -40,7 +37,7 @@ services:
     ports:
       - "3000:3000"
     env_file:
-      - ./gateway/.env # <--- โหลด .env ในโฟลเดอร์ gateway
+      - .env # <--- โหลด .env ในโฟลเดอร์ gateway
     environment:
       # ตัวแปรเหล่านี้อ้างอิงถึง Hostname ใน Docker Network
       # และตัวแปร HTTP_PORT ที่ใช้ในการ map port ของ container
