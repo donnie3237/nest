@@ -1,0 +1,131 @@
+# ====================================================================
+# 0. Namespace
+# ====================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-nest-app
+---
+
+# ====================================================================
+# 0.1 Secret (จาก .env)
+# ====================================================================
+envFrom:
+  - secretRef:
+      name: all-app-secrets
+---
+
+# ====================================================================
+# 1. User Service
+# ====================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service-deployment
+  namespace: my-nest-app
+  labels:
+    app: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+        - name: user-app
+          image: doseza007/nest-user:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - secretRef:
+                name: all-app-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: my-nest-app
+spec:
+  selector:
+    app: user-service
+  ports:
+    - protocol: TCP
+      port: 3001
+      targetPort: 3001
+  type: ClusterIP
+---
+
+# ====================================================================
+# 2. Gateway Service
+# ====================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-deployment
+  namespace: my-nest-app
+  labels:
+    app: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway-app
+          image: doseza007/nest-gateway:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: all-app-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-service
+  namespace: my-nest-app
+spec:
+  selector:
+    app: gateway
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+
+# ====================================================================
+# 3. Ingress
+# ====================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway-ingress
+  namespace: my-nest-app
+  annotations:
+    # สำหรับ Traefik (กรณีใช้ HTTPS):
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: nest.dossware.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-service
+                port:
+                  number: 80

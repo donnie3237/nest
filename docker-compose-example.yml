@@ -1,0 +1,35 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: rabbitmq_host
+    container_name: my-rabbit
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: myuser
+      RABBITMQ_DEFAULT_PASS: mypassword
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_logs:/var/log/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:latest
+    hostname: redis_host
+    container_name: my-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+  rabbitmq_logs:
+  redis_data:
