@@ -1,112 +1,15 @@
-name: Build, Push Docker and Deploy to Kubernetes
+name: Print Known GitHub Secrets
 
 on:
-  release:
-    types: [published] # This workflow runs when a new release is published.
+  workflow_dispatch:
 
 jobs:
-  build-and-push-gateway:
+  print-secrets:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4 # Fetches your repository's code.
-
-      # --- START DANGER ZONE: DEBUGGING SECRETS (REMOVE THIS AFTER USE) ---
-      # **WARNING: This step exposes your secrets in the workflow logs.
-      # DO NOT commit this to your main branch or leave it enabled in production.**
-      - name: Print Docker Hub Credentials (DANGEROUS & NOT Logging In)
-        env:
-          MY_DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          MY_DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Unsafe: Print selected secrets
         run: |
-          echo "--- DANGER: Docker Hub Credentials (For Debugging ONLY) ---"
-          echo "DOCKER_USERNAME: $MY_DOCKER_USERNAME"
-          echo "DOCKER_PASSWORD: $MY_DOCKER_PASSWORD" # GitHub Actions usually masks secrets with '***'
-          echo "--- END DANGER ---"
-      # --- END DANGER ZONE ---
-
-      # --- COMMENTED OUT: Actual Docker Login and Build/Push (for debugging secrets only) ---
-      # - name: Log in to Docker Hub
-      #   uses: docker/login-action@v3
-      #   with:
-      #     username: ${{ secrets.DOCKER_USERNAME }}
-      #     password: ${{ secrets.DOCKER_PASSWORD }}
-
-      # - name: Build and push gateway image
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     context: ./gateway
-      #     push: true
-      #     tags: doseza007/nest-gateway:latest
-      # --- END COMMENTED OUT SECTION ---
-
-  build-and-push-user:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # --- START DANGER ZONE: DEBUGGING SECRETS (REMOVE THIS AFTER USE) ---
-      # **WARNING: This step exposes your secrets in the workflow logs.
-      # DO NOT commit this to your main branch or leave it enabled in production.**
-      - name: Print Docker Hub Credentials (DANGEROUS & NOT Logging In)
-        env:
-          MY_DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          MY_DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          echo "--- DANGER: Docker Hub Credentials (For Debugging ONLY) ---"
-          echo "DOCKER_USERNAME: $MY_DOCKER_USERNAME"
-          echo "DOCKER_PASSWORD: $MY_DOCKER_PASSWORD"
-          echo "--- END DANGER ---"
-      # --- END DANGER ZONE ---
-
-      # --- COMMENTED OUT: Actual Docker Login and Build/Push (for debugging secrets only) ---
-      # - name: Log in to Docker Hub
-      #   uses: docker/login-action@v3
-      #   with:
-      #     username: ${{ secrets.DOCKER_USERNAME }}
-      #     password: ${{ secrets.DOCKER_PASSWORD }}
-
-      # - name: Build and push user image
-      #   uses: docker/build-push-action@v5
-      #   with:
-      #     context: ./user
-      #     push: true
-      #     tags: doseza007/nest-user:latest
-      # --- END COMMENTED OUT SECTION ---
-
-  deploy-to-kubernetes:
-    runs-on: ubuntu-latest
-    # เนื่องจาก Jobs build-and-push-gateway และ build-and-push-user ถูกปิดการทำงาน
-    # Job deploy-to-kubernetes จะไม่สามารถรันได้หาก needs ยังชี้ไปที่ Jobs ที่ปิดอยู่
-    # คุณต้องเลือกอย่างใดอย่างหนึ่ง:
-    # 1. ลบ needs บรรทัดนี้ออกไป เพื่อให้ deploy-to-kubernetes รันได้โดยอิสระ
-    # 2. หรือปิดการทำงานของ deploy-to-kubernetes ทั้งหมดหากคุณต้องการดีบั๊กแค่การ Login
-    # ผมจะปิดการทำงานของ deploy-to-kubernetes ไปก่อนในตัวอย่างนี้
-    # needs: [build-and-push-gateway, build-and-push-user]
-
-    # --- COMMENTED OUT: Entire deploy-to-kubernetes job (for debugging secrets only) ---
-    # steps:
-    #   - name: Checkout code
-    #     uses: actions/checkout@v4
-
-    #   - name: DEBUG: Print SSH Credentials (DANGEROUS!)
-    #     env:
-    #       MY_SERVER_HOST: ${{ secrets.SERVER_HOST }}
-    #       MY_SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
-    #     run: |
-    #       echo "--- DANGER: SSH Credentials (For Debugging ONLY) ---"
-    #       echo "Server Host: $MY_SERVER_HOST"
-    #       echo "SSH Password: $MY_SSH_PASSWORD"
-    #       echo "--- END DANGER ---"
-
-    #   - name: Deploy to Kubernetes
-    #     uses: appleboy/ssh-action@v1.0.3
-    #     with:
-    #       host: ${{ secrets.SERVER_HOST }}
-    #       username: 'root'
-    #       password: ${{ secrets.SSH_PASSWORD }}
-    #       script: |
-    #         cd /root/ne
-    #         kubectl apply -f c.yaml
-    # --- END COMMENTED OUT SECTION ---
+          echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}"
+          echo "DOCKER_PASSWORD=${{ secrets.DOCKER_PASSWORD }}"
+          echo "SERVER_HOST=${{ secrets.SERVER_HOST }}"
+          echo "SSH_PASSWORD=${{ secrets.SSH_PASSWORD }}"
