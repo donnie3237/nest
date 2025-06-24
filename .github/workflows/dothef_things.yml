@@ -58,4 +58,4 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             cd /root/ne
-            kubectl apply -f c.yaml
+            kubectl apply -f a.yml
