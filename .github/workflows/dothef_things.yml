@@ -20,7 +20,8 @@ jobs:
       - name: Build and push gateway image
         uses: docker/build-push-action@v5
         with:
-          context: apps/gateway/Dockerfile
+          context: .
+          file: apps/gateway/Dockerfile
           push: true
           tags: doseza007/nest-gateway:latest
 
@@ -39,7 +40,8 @@ jobs:
       - name: Build and push user image
         uses: docker/build-push-action@v5
         with:
-          context: apps/user/Dockerfile
+          context: .
+          file: apps/user/Dockerfile
           push: true
           tags: doseza007/nest-user:latest
 
@@ -58,7 +60,8 @@ jobs:
       - name: Build and push product image
         uses: docker/build-push-action@v5
         with:
-          context: apps/product/Dockerfile
+          context: .
+          file: apps/product/Dockerfile
           push: true
           tags: doseza007/nest-product:latest
 
