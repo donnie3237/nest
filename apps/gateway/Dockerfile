@@ -1,76 +1,63 @@
-# --- Stage 1: Build Stage ---
-FROM node:20-alpine AS builder
+# apps/gateway/Dockerfile
+# Multi-stage build with turbo prune and Bun runtime
 
-# ตั้งค่า working directory เป็น root ของ monorepo ภายใน container
-# เพื่อให้ turborepo และ pnpm สามารถเข้าถึงทุก workspace ได้
+# Stage 0: Prune the workspace for the specific application
+FROM oven/bun:latest AS pruner
+
 WORKDIR /app
 
-# คัดลอกไฟล์หลักของ monorepo ที่จำเป็นสำหรับการจัดการ dependencies และการ build
-# ต้องคัดลอกจาก context root (ซึ่งจะถูกส่งเข้ามาเมื่อ build)
-COPY package.json pnpm-lock.yaml ./
-COPY pnpm-workspace.yaml ./
-COPY turbo.json ./
+RUN npm install -g pnpm
 
-# สร้างโฟลเดอร์สำหรับ apps/ และ packages/ ล่วงหน้า
-# เพื่อป้องกัน permission issues และเตรียมพร้อมสำหรับการคัดลอก workspace
-RUN mkdir -p apps packages
+# Copy necessary files for pruning:
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/ ./apps/
+COPY packages/ ./packages/
 
-# คัดลอก package.json ของทุก workspace ที่แอปนี้ต้องใช้
-# ตัวอย่าง: แอป API อาจจะใช้ package common
-COPY apps/api/package.json apps/api/
-COPY packages/config/package.json packages/config/
-COPY packages/database/package.json packages/database/
-# เพิ่มบรรทัดนี้สำหรับทุกๆ package หรือ app อื่นๆ ที่ apps/api ต้องพึ่งพา (ถ้ามี)
-# เช่น ถ้า api ใช้ ui: COPY packages/ui/package.json packages/ui/
-
-# ติดตั้ง root dependencies
-# pnpm install จะจัดการ node_modules ของทุก workspace ให้ถูกต้อง
+# Install root dependencies using pnpm
 RUN pnpm install --frozen-lockfile
 
-# คัดลอก source code เฉพาะที่จำเป็น (หรือทั้งหมด)
-# ถ้าคุณต้องการให้ Docker cache ทำงานได้ดีขึ้นสำหรับ source code
-# คุณสามารถคัดลอกทีละโฟลเดอร์ (เช่น apps/api/src)
-# แต่ถ้าไฟล์ package.json ไม่ได้เปลี่ยนบ่อย การ COPY . . ทั้งหมดอาจจะง่ายกว่า
-COPY . .
+# Prune the workspace to include only the target app and its dependencies
+ARG APP_NAME=gateway
+RUN turbo prune --scope=$APP_NAME --docker
 
-# Build เฉพาะแอป "api" โดยใช้ Turborepo
-# ตรวจสอบว่า script "build" ใน package.json ของ apps/api ถูกกำหนดไว้ (เช่น "build": "nest build")
-# หรือใน turbo.json มี task "build" สำหรับ "api"
-RUN pnpm --filter=api build
 
-# --- Stage 2: Production Stage ---
-FROM node:20-alpine AS runner
+# Stage 1: Build the application from the pruned workspace
+FROM oven/bun:latest AS builder
 
-# ตั้งค่า environment variables สำหรับ production
-ENV NODE_ENV=production
-
-# ตั้งค่า working directory เป็น root ของ monorepo ภายใน container
 WORKDIR /app
 
-# สร้างโฟลเดอร์ที่จำเป็นสำหรับ app ที่จะรัน
-RUN mkdir -p apps packages
+# Copy the pruned workspace output
+COPY --from=pruner /app/out/full/ .
+COPY --from=pruner /app/out/json/package.json ./package.json
 
-# คัดลอกไฟล์หลักของ monorepo
-COPY --from=builder /app/package.json /app/pnpm-lock.yaml ./
-COPY --from=builder /app/pnpm-workspace.yaml ./
+# Install dependencies in the builder context using Bun's package manager
+RUN bun install --frozen-lockfile
 
-# คัดลอก package.json ของ app "api" และ dependencies ที่จำเป็นใน production
-COPY --from=builder /app/apps/api/package.json /app/apps/api/
-COPY --from=builder /app/packages/config/package.json /app/packages/config/
-COPY --from=builder /app/packages/database/package.json /app/database/config/
-# เพิ่มบรรทัดนี้สำหรับทุกๆ package หรือ app อื่นๆ ที่ apps/api ต้องพึ่งพาใน production (ถ้ามี)
+# Build the specific NestJS application
+ARG APP_NAME=gateway
+RUN pnpm run build --filter=$APP_NAME
 
-# คัดลอกเฉพาะ build output ของแอป "api"
-# ตรวจสอบ path ของ dist folder ของแอป "api"
-COPY --from=builder /app/dist/apps/api /app/dist/apps/api
 
-# ติดตั้งเฉพาะ production dependencies ใน production stage
-# เพื่อให้ image มีขนาดเล็กที่สุด
-RUN pnpm install --prod --frozen-lockfile
+# Stage 2: Create the final production-ready image
+FROM oven/bun:latest AS runner
 
-# Expose port ที่ NestJS app ของคุณรันอยู่
-EXPOSE 3000
+WORKDIR /app
 
-# กำหนด command สำหรับรัน NestJS app "api"
-# ตรวจสอบว่า main.js อยู่ที่ไหนใน build output ของคุณ
-CMD ["node", "dist/apps/api/main.js"]
+# Copy the pruned package.json and node_modules (production only)
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+
+# Copy the built application output
+ARG APP_NAME=gateway
+COPY --from=builder /app/apps/$APP_NAME/dist ./apps/$APP_NAME/dist
+
+# Set environment variables for production
+ENV NODE_ENV production
+
+# Expose the application port
+ARG PORT=8000
+EXPOSE $PORT
+
+# Command to run the application using Bun
+CMD ["bun", "apps/gateway/dist/main"]

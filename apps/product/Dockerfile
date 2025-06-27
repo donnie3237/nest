@@ -17,7 +17,7 @@ COPY packages/ ./packages/
 RUN pnpm install --frozen-lockfile
 
 # Prune the workspace to include only the target app and its dependencies
-ARG APP_NAME=product
+ARG APP_NAME=product-service
 RUN turbo prune --scope=$APP_NAME --docker
 
 
