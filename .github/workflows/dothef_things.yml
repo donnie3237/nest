@@ -20,7 +20,7 @@ jobs:
       - name: Build and push gateway image
         uses: docker/build-push-action@v5
         with:
-          context: ./apps/gateway
+          context: apps/gateway/Dockerfile
           push: true
           tags: doseza007/nest-gateway:latest
 
@@ -39,7 +39,7 @@ jobs:
       - name: Build and push user image
         uses: docker/build-push-action@v5
         with:
-          context: ./apps/user
+          context: apps/user/Dockerfile
           push: true
           tags: doseza007/nest-user:latest
 
@@ -55,10 +55,10 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }} 
 
-      - name: Build and push user image
+      - name: Build and push product image
         uses: docker/build-push-action@v5
         with:
-          context: ./apps/product
+          context: apps/product/Dockerfile
           push: true
           tags: doseza007/nest-product:latest
 
