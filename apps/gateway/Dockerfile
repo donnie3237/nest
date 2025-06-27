@@ -11,7 +11,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.4 --activate
 RUN pnpm install --frozen-lockfile --filter=apps/gateway...
 
 # Build the gateway app only
-RUN pnpm turbo run build --filter=apps/gateway...
+RUN pnpm turbo run build --filter=gateway
 
 # Stage 2: Production image
 FROM node:20-alpine

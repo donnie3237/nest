@@ -9,7 +9,7 @@ RUN corepack enable && corepack prepare pnpm@8.15.4 --activate
 
 RUN pnpm install --frozen-lockfile --filter=apps/product...
 
-RUN pnpm turbo run build --filter=apps/product...
+RUN pnpm turbo run build --filter=product-service
 
 # Stage 2: Production
 FROM node:20-alpine
