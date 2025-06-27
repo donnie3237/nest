@@ -2,7 +2,7 @@ name: Build, Push Docker and Deploy to Kubernetes
 
 on:
   release:
-    types: [published]
+    types: [published] # This workflow runs when a new release is published.
 
 jobs:
   build-and-push:
@@ -10,45 +10,89 @@ jobs:
     strategy:
       matrix:
         service:
+          # Define your services with their paths (relative to monorepo root) and image names
           - name: gateway
-            path: apps/gateway/Dockerfile
+            path: apps/gateway # Path to the service folder, where Dockerfile resides
             image: doseza007/nest-gateway
+            port: 8000 # Example port for gateway
           - name: user
-            path: apps/user/Dockerfile
+            path: apps/user
             image: doseza007/nest-user
           - name: product
-            path: apps/product/Dockerfile
+            path: apps/product
             image: doseza007/nest-product
+          # Add order service if you implement it
+          # - name: order
+          #   path: apps/order
+          #   image: doseza007/nest-order
+          #   port: 3001 # Example port for order service
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Essential for Turborepo's remote caching
 
-      - uses: docker/login-action@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Use Node.js 20 (LTS)
+          cache: 'pnpm' # Use pnpm caching
+
+      - name: Enable Corepack & Setup pnpm
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: Install Monorepo Dependencies
+        # This installs all dependencies for the entire monorepo
+        # Turborepo build depends on this to find all packages and their dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - uses: docker/build-push-action@v5
+      - name: Get current date and short SHA for image tag
+        id: build_info
+        run: |
+          echo "DATE=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+          echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push ${{ matrix.service.name }} Docker image
+        uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ${{ matrix.service.path }}
+          context: . # Build context is the monorepo root
+          file: ${{ matrix.service.path }}/Dockerfile # Path to the service-specific Dockerfile
           push: true
           tags: |
             ${{ matrix.service.image }}:latest
-            ${{ matrix.service.image }}:${{ github.ref_name }}
+            ${{ matrix.service.image }}:${{ github.ref_name }} # e.g., 'v1.0.0'
+            ${{ matrix.service.image }}:${{ steps.build_info.outputs.DATE }}-${{ steps.build_info.outputs.SHA }}
+          cache-from: type=gha # Use GitHub Actions caching for Docker layers
+          cache-to: type=gha,mode=max
 
   deploy-to-kubernetes:
-    needs: build-and-push
+    needs: build-and-push # This job waits for all services in 'build-and-push' to be built and pushed
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    
+    # You might need to make this job run once if you are deploying multiple images
+    # If your k8s/deployment.yml expects *all* images to be updated at once.
+    # Otherwise, you might consider having separate deploy jobs per service
+    # or passing image tags dynamically.
 
-      - name: Deploy to Kubernetes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Kubernetes (using :latest tag)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: 'root'
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /root/ne
-            kubectl apply -f k8s/deployment.yml
+            cd /root/ne # Assuming your k8s manifests are here
+            # You might need to ensure the kubectl context is correctly set up on the target server
+            # e.g., using `KUBECONFIG` env var or ensuring `~/.kube/config` is in place.
+            kubectl apply -f k8s/deployment.yml # This will deploy all services using their latest tags
