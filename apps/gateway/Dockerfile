@@ -1,50 +1,27 @@
-# Stage 0: Prune the workspace for gateway
-FROM node:20-bullseye AS pruner
+# Stage 1: Build
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-RUN npm install -g pnpm@latest
+COPY . .
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
-COPY apps/ ./apps/
-COPY packages/ ./packages/
+RUN corepack enable && corepack prepare pnpm@8.15.4 --activate
 
-RUN pnpm install --frozen-lockfile
+# Install only relevant dependencies for this app
+RUN pnpm install --frozen-lockfile --filter=apps/gateway...
 
-ARG APP_NAME=gateway
-RUN npx turbo prune --scope=$APP_NAME --docker
+# Build the gateway app only
+RUN pnpm turbo run build --filter=apps/gateway...
 
-
-# Stage 1: Build the application
-FROM node:20-bullseye AS builder
+# Stage 2: Production image
+FROM node:20-alpine
 
 WORKDIR /app
 
-COPY --from=pruner /app/out/full/ ./
-COPY --from=pruner /app/out/json/package.json ./package.json
-COPY --from=pruner /app/out/json/pnpm-lock.yaml ./pnpm-lock.yaml
+# Copy only built output
+COPY --from=builder /app/apps/gateway/dist ./dist
+COPY --from=builder /app/apps/gateway/package.json ./
 
-RUN npm install -g pnpm@latest
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile
 
-ARG APP_NAME=gateway
-RUN pnpm run build --filter=$APP_NAME
-
-
-# Stage 2: Final production image
-FROM node:20-bullseye AS runner
-
-WORKDIR /app
-
-ARG APP_NAME=gateway
-ENV NODE_ENV=production
-ENV APP_NAME=$APP_NAME
-
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/apps/$APP_NAME/dist ./apps/$APP_NAME/dist
-
-EXPOSE 8000
-
-CMD sh -c "node apps/${APP_NAME}/dist/main.js"
+CMD ["node", "dist/main.js"]
