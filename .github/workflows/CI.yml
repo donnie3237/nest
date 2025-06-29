@@ -1,5 +1,5 @@
 # .github/workflows/deploy.yml
-name: Build, Push Docker & Deploy to K8s
+name: Build, Push Docker (Bun) & Deploy to K8s
 
 on:
   release:
@@ -11,6 +11,8 @@ jobs:
     strategy:
       matrix:
         service:
+          # name คือชื่อใน package.json (สำหรับ --filter)
+          # path คือชื่อ directory (สำหรับหา dist)
           - name: 'gateway'
             path: 'gateway'
             image: 'doseza007/nest-gateway'
@@ -24,31 +26,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 9
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Prune monorepo for ${{ matrix.service.name }}
-        run: pnpm turbo prune ${{ matrix.service.name }} --docker
-
-      - name: Get build info
-        id: info
-        run: |
-          echo "DATE=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
-          echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -62,14 +39,24 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build & Push ${{ matrix.service.name }}
+      - name: Get build info
+        id: info
+        run: |
+          echo "DATE=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+          echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push with Bun
         uses: docker/build-push-action@v5
         with:
-          # --- จุดที่แก้ไขให้ถูกต้องตาม Log ---
-          context: ./out/full
-          file: ./out/full/apps/${{ matrix.service.path }}/Dockerfile
-          # ------------------------------------
+          # context คือ root ของโปรเจกต์
+          context: .
+          # ใช้ Dockerfile.bun ที่เราสร้างขึ้นใหม่
+          file: ./dockerfile.bun
           push: true
+          # ส่งตัวแปรเข้าไปใน Dockerfile
+          build-args: |
+            PROJECT_NAME=${{ matrix.service.name }}
+            PROJECT_PATH=${{ matrix.service.path }}
           tags: |
             ${{ matrix.service.image }}:latest
             ${{ matrix.service.image }}:${{ github.ref_name }}
