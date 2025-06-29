@@ -1,7 +1,7 @@
 # Dockerfile.pruned
 
 # --- STAGE 1: Builder ---
-# ใช้ Node base image เพื่อติดตั้ง pnpm และ build โปรเจกต์จาก context ที่ถูก prune แล้ว
+# ใช้ Node base image เพื่อติดตั้ง pnpm และ build โปรเจกต์อย่างถูกต้อง
 FROM node:18-alpine AS builder
 
 # ติดตั้ง pnpm
@@ -10,19 +10,24 @@ RUN npm install -g pnpm
 WORKDIR /app
 ARG PROJECT_NAME
 
-# คัดลอกทุกอย่างจาก 'out' directory (build context) เข้ามา
-# ตอนนี้ใน image จะมีโครงสร้างเป็น /app/full, /app/pnpm-lock.yaml ฯลฯ
-COPY . .
+# --- THE FIX for "No projects found" ---
+# 1. คัดลอกไฟล์ config ของ pnpm ที่ root ก่อน
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# ติดตั้ง dependency ทั้งหมดที่จำเป็นจาก pnpm-lock.yaml
-# pnpm จะอ่าน pnpm-workspace.yaml และติดตั้งเฉพาะส่วนที่อยู่ใน /app/full
-RUN pnpm install --frozen-lockfile
+# 2. คัดลอกโค้ดที่ prune แล้วจาก 'full/' directory เข้ามาที่ root ของ /app
+# ทำให้โครงสร้างถูกต้องเป็น /app/apps, /app/packages
+COPY full/ .
+# --------------------------------------
 
-# Build โปรเจกต์เป้าหมาย (pnpm จะหาเจอเพราะเราติดตั้งทุกอย่างแล้ว)
+# pnpm จะติดตั้ง dependency ของโปรเจกต์เป้าหมายและ dependency ย่อยๆ ทั้งหมด
+RUN pnpm install --filter=${PROJECT_NAME}...
+
+# pnpm run จะจัดการ PATH ของ nest command ให้ถูกต้องเสมอ
 RUN pnpm run --filter=${PROJECT_NAME} build
 
-# ลบ devDependencies ออกเพื่อลดขนาด node_modules
-RUN pnpm prune --prod --filter=${PROJECT_NAME}...
+# --- THE FIX for "Unknown option: 'recursive'" ---
+# ลบ devDependencies ออกเพื่อลดขนาด node_modules (เอา ... ออก)
+RUN pnpm prune --prod --filter=${PROJECT_NAME}
 
 
 # --- STAGE 2: Final Runner ---
@@ -36,10 +41,9 @@ WORKDIR /usr/src/app
 USER bun
 
 # คัดลอกไฟล์ที่จำเป็นจาก Stage Builder
-# **สังเกตว่า PATH ตอนนี้มี 'full/' นำหน้า** เพราะเรา COPY มาแบบนั้น
-COPY --from=builder --chown=bun:bun /app/full/apps/${PROJECT_PATH}/dist ./dist
+COPY --from=builder --chown=bun:bun /app/apps/${PROJECT_PATH}/dist ./dist
 COPY --from=builder --chown=bun:bun /app/node_modules ./node_modules
-COPY --from=builder --chown=bun:bun /app/full/apps/${PROJECT_PATH}/package.json ./package.json
+COPY --from=builder --chown=bun:bun /app/apps/${PROJECT_PATH}/package.json ./package.json
 
 ENV NODE_ENV=production
 

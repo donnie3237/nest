@@ -78,4 +78,3 @@ jobs:
             ${{ matrix.service.image }}:${{ steps.info.outputs.DATE }}-${{ steps.info.outputs.SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
