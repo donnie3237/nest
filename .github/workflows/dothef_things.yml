@@ -44,6 +44,15 @@ jobs:
       - name: Prune monorepo for ${{ matrix.service.name }}
         run: pnpm turbo prune ${{ matrix.service.name }} --docker
 
+      # --- ขั้นตอน DEBUG ที่เพิ่มเข้ามา ---
+      - name: 🧐 Inspect 'out' directory
+        run: |
+          echo "--- Listing contents of 'out' directory recursively ---"
+          ls -R out
+          echo "--- Displaying content of ./out/Dockerfile ---"
+          cat ./out/Dockerfile || echo "Dockerfile not found or is empty!"
+      # ------------------------------------
+
       - name: Get build info
         id: info
         run: |
@@ -66,10 +75,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./out
-          # ==========================================================
-          # !! จุดที่สำคัญที่สุด !! ต้องเป็น path นี้เท่านั้น
           file: ./out/Dockerfile
-          # ==========================================================
           push: true
           tags: |
             ${{ matrix.service.image }}:latest
@@ -77,28 +83,3 @@ jobs:
             ${{ matrix.service.image }}:${{ steps.info.outputs.DATE }}-${{ steps.info.outputs.SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  deploy-to-kubernetes:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup SSH key & Deploy
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            echo "--- Deploying all services with new release tag: ${{ github.ref_name }} ---"
-            
-            kubectl set image deployment/gateway gateway=doseza007/nest-gateway:${{ github.ref_name }} --namespace your-namespace
-            kubectl set image deployment/user user=doseza007/nest-user:${{ github.ref_name }} --namespace your-namespace
-            kubectl set image deployment/product product=doseza007/nest-product:${{ github.ref_name }} --namespace your-namespace
-
-            echo "--- Waiting for rollout to complete ---"
-            kubectl rollout status deployment/gateway --namespace your-namespace
-            kubectl rollout status deployment/user --namespace your-namespace
-            kubectl rollout status deployment/product --namespace your-namespace
-
-            echo "--- Deployment finished successfully! ---"
