@@ -47,7 +47,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.final
+          file: ./dockerfile.bun
           push: true
           build-args: |
             PROJECT_NAME=${{ matrix.service.name }}

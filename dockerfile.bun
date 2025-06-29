@@ -1,44 +1,48 @@
-# Dockerfile.bun
+# Dockerfile.final
 
-# 1. Base Stage
-FROM oven/bun:1-alpine AS base
+# --- STAGE 1: Builder ---
+# ใช้ Node base image ที่มี pnpm เพื่อติดตั้งและ build โปรเจกต์อย่างถูกต้อง
+FROM node:18-alpine AS builder
+
+# ติดตั้ง pnpm
+RUN npm install -g pnpm
+
 WORKDIR /usr/src/app
+ARG PROJECT_NAME
 
-# 2. Dependencies Stage: ติดตั้ง Dependencies ทั้งหมดสำหรับ Build
-FROM base AS dependencies
+# คัดลอกไฟล์ที่จำเป็นทั้งหมด
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ packages/
 COPY apps/ apps/
-RUN bun install
 
-# 3. Builder Stage: Build โปรเจกต์
-FROM dependencies AS builder
-ARG PROJECT_NAME
+# pnpm จะติดตั้ง dependency ของโปรเจกต์เป้าหมายและ dependency ย่อยๆ ทั้งหมด
+RUN pnpm install --filter=${PROJECT_NAME}...
 
-# ---- THE FIX IS HERE ----
-# บังคับให้ใช้ PATH ที่ถูกต้องนำหน้าคำสั่ง RUN โดยตรง
-RUN PATH="/usr/src/app/node_modules/.bin:$PATH" bun run --filter=${PROJECT_NAME} build
+# pnpm run จะจัดการ PATH ของ nest command ให้ถูกต้องเสมอ
+RUN pnpm run --filter=${PROJECT_NAME} build
 
-# 4. Final Runner Stage: สร้าง Image สุดท้ายที่เล็กและปลอดภัย
-FROM base AS final
+# ลบ devDependencies ออกเพื่อลดขนาด node_modules
+RUN pnpm prune --prod --filter=${PROJECT_NAME}...
+
+
+# --- STAGE 2: Final Runner ---
+# สลับมาใช้ Bun image เพื่อรันโปรแกรมที่ build เสร็จแล้ว
+FROM oven/bun:1-alpine AS final
+
 ARG PROJECT_PATH
 WORKDIR /usr/src/app
 
-# สลับไปใช้ user 'bun' ที่มีมาให้แล้ว
+# สลับไปใช้ user 'bun'
 USER bun
 
-# คัดลอกไฟล์ที่จำเป็นเพื่อติดตั้งเฉพาะ Production Dependencies
-COPY --from=dependencies --chown=bun:bun package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY --from=dependencies --chown=bun:bun packages/ packages/
-COPY --from=dependencies --chown=bun:bun apps/ apps/
-
-# ติดตั้งเฉพาะ Production Dependencies เท่านั้น
-RUN bun install --production
-
-# คัดลอกเฉพาะ Build output จาก builder stage
+# คัดลอกไฟล์ที่จำเป็นจาก Stage Builder
 COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT_PATH}/dist ./dist
+COPY --from=builder --chown=bun:bun /usr/src/app/node_modules ./node_modules
+# คัดลอก package.json ของ service ที่ build เพื่อให้ bun run ทำงานได้
+COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT_PATH}/package.json ./package.json
+
 
 ENV NODE_ENV=production
 
-# รันโปรแกรม
+# ใช้ Bun runtime ในการรันไฟล์ JS
 CMD ["bun", "run", "dist/main.js"]
