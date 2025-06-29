@@ -1,27 +1,24 @@
 # 1. Base Stage: ใช้ base image ของ Bun
-# oven/bun:1-alpine หมายถึง Bun v1.x ล่าสุดบน Alpine (แนะนำ)
-# หากต้องการเวอร์ชันล่าสุดเสมอ สามารถเปลี่ยนเป็น oven/bun:latest-alpine ได้
 FROM oven/bun:1-alpine AS base
 WORKDIR /usr/src/app
 
-# 2. Installer Stage: ติดตั้ง Dependencies ทั้งหมด
+# 2. Installer Stage: ติดตั้ง Dependencies จาก pnpm lockfile
 FROM base AS installer
 ARG PROJECT
 
-# คัดลอกไฟล์ที่จำเป็นสำหรับการติดตั้ง dependency
-COPY package.json bun.lockb* tsconfig.json ./
+# คัดลอกไฟล์ที่จำเป็นสำหรับการติดตั้ง dependency จาก pnpm
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/ apps/
 COPY packages/ packages/
 
-# ติดตั้ง dependency ทั้งหมดสำหรับ monorepo
-RUN bun install --frozen-lockfile
+# Bun สามารถอ่าน pnpm-lock.yaml และติดตั้งเวอร์ชันที่ถูกต้องให้เองได้โดยตรง
+RUN bun install
 
 # 3. Builder Stage: Build โปรเจกต์เป้าหมาย
 FROM installer AS builder
 ARG PROJECT
 
 # รัน build script สำหรับโปรเจกต์ที่ระบุ
-# Bun ไม่มี --filter แต่เราใช้ --cwd เพื่อระบุ workspace ที่จะรันคำสั่งแทน
 RUN bun run --cwd ./apps/${PROJECT} build
 
 # 4. Runner Stage: สร้าง Final image ที่เล็กและพร้อมใช้งาน
