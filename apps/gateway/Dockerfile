@@ -1,28 +1,38 @@
-# Dockerfile for apps/gateway microservice in a pnpm/Turborepo monorepo
-
-# Stage 1: Builder ... (Same as before)
-FROM node:20-alpine AS builder
+# 1. Base image + pnpm & turbo global
+FROM node:18-alpine AS base
+RUN apk add --no-cache libc6-compat \
+  && corepack enable \
+  && corepack prepare pnpm@latest --activate \
+  && pnpm install turbo --global
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-COPY turbo.json ./
-COPY tsconfig*.json ./
-RUN corepack enable && corepack prepare pnpm@latest --activate
-RUN pnpm install --frozen-lockfile
-COPY packages ./packages
-COPY apps/gateway ./apps/gateway
-RUN turbo run build --filter=gateway
 
-# Stage 2: Runner ... (Same as before)
-FROM node:20-alpine AS runner
+# 2. Prune monorepo for specific project
+FROM base AS pruner
+ARG PROJECT
+COPY . .
+RUN turbo prune --scope=${PROJECT} --docker   # ปรับ prune ให้เป็น docker build filter :contentReference[oaicite:1]{index=1}
+
+# 3. Installer stage
+FROM base AS installer
+ARG PROJECT
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-COPY apps/gateway/package.json ./apps/gateway/
-COPY --from=builder /app/apps/gateway/dist ./apps/gateway/dist
-RUN corepack enable && corepack prepare pnpm@latest --activate && \
-    pnpm install --prod --frozen-lockfile --filter=./apps/gateway...
+COPY --from=pruner /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=pruner /app/out/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=pruner /app/out/json/ .
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile   :contentReference[oaicite:2]{index=2}
 
-# Expose the port your NestJS Gateway application listens on (changed to 8000)
-EXPOSE 8000
+COPY --from=pruner /app/out/full/ .
+RUN pnpm run build --filter=${PROJECT}        :contentReference[oaicite:3]{index=3}
+# Optionally prune devdeps
+RUN pnpm prune --prod
 
-# Set the command to run your NestJS application
-CMD ["node", "apps/gateway/dist/main.js"]
+# 4. Runner stage
+FROM node:18-alpine AS runner
+RUN apk add --no-cache libc6-compat \
+  && addgroup -S --gid 1001 nodejs \
+  && adduser -S --uid 1001 nodejs
+USER nodejs
+WORKDIR /app
+COPY --from=installer --chown=nodejs:nodejs /app .
+ENV NODE_ENV=production
+CMD ["node", "dist/apps/${PROJECT}/main.js"]

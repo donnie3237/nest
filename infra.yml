@@ -1,0 +1,405 @@
+# ===================================================================
+# == Declarative App Stack for dossware.com (Traefik Version)
+# == This file defines all core applications, their Ingress configurations,
+# == the Certificate Issuers, Persistence settings, AND the ELK Stack for logging.
+# == It assumes the default Traefik Ingress Controller from K3s is being used.
+# ==
+# == To use:
+# == 1. Install Argo CD first.
+# == 2. Place this file in a Git repository.
+# == 3. Create one final "root" app in Argo CD UI that points to this file.
+# ===================================================================
+
+# =================================================
+# == 1. Cert-Manager Application
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.12.0 # The version from your command
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  # It's very important to set installCRDs=true for cert-manager
+  helm:
+    values: |
+      installCRDs: true
+
+---
+
+# =================================================
+# == ADDED: ClusterIssuer Definitions for Cert-Manager
+# == This tells Cert-Manager how to get certificates from Let's Encrypt.
+# =================================================
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  # This is the PRODUCTION issuer. Use this for real, trusted certificates.
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # !!! IMPORTANT: Change this to your real email address !!!
+    email: your-email@dossware.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-private-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  # This is the STAGING issuer. Use this for testing to avoid rate limits.
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # !!! IMPORTANT: Change this to your real email address !!!
+    email: your-email@dossware.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-private-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+
+---
+
+# =================================================
+# == 2. Prometheus + Grafana Application
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 58.1.0 # Using a specific stable version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      grafana:
+        # --- Ingress Configuration for Grafana ---
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          hosts:
+            - "grafana.dossware.com"
+          tls:
+            - secretName: grafana-dossware-com-tls
+              hosts:
+                - "grafana.dossware.com"
+        # --- Grafana config to handle proxying correctly ---
+        grafana.ini:
+          server:
+            root_url: https://grafana.dossware.com
+            serve_from_sub_path: false
+        # --- ADDED: Persistence for Grafana ---
+        # Stores dashboards and settings, so they are not lost on pod restart.
+        persistence:
+          enabled: true
+          type: pvc
+          storageClassName: "local-path" # K3s default storage class
+          accessModes:
+            - ReadWriteOnce
+          size: 5Gi
+
+      prometheus:
+        # --- ADDED: Persistence for Prometheus ---
+        # Stores metrics data, so it is not lost on pod restart.
+        prometheusSpec:
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: "local-path" # K3s default storage class
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 20Gi
+---
+
+# =================================================
+# == 3. Argo CD Application (The "App of Self")
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: 8.1.2 # A recent stable version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  # Ignore differences for the app-of-self pattern to avoid loops
+  ignoreDifferences:
+  - group: argoproj.io
+    kind: Application
+    jsonPointers:
+    - /spec/source
+  helm:
+    values: |
+      configs:
+        params:
+          "server.insecure": "true"
+        cm:
+          url: https://argocd.dossware.com
+      # --- Ingress and Persistence Configuration for Argo CD ---
+      server:
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          annotations:
+            cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          hosts:
+            - "argocd.dossware.com"
+          tls:
+            - secretName: argocd-dossware-com-tls
+              hosts:
+                - "argocd.dossware.com"
+        # --- ADDED: Persistence for Argo CD Server ---
+        # Can improve performance by caching data.
+        persistence:
+          enabled: true
+          storageClassName: "local-path"
+          size: 8Gi
+
+---
+
+# =================================================
+# == 4. Redis Application
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: redis
+    targetRevision: 19.6.1 # Using a specific stable version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+
+# =================================================
+# == 5. RabbitMQ Application
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: rabbitmq
+    targetRevision: 15.2.0 # Using a specific stable version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: data-services
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      # ---------------------------------------------------------------
+      # !! SECURITY WARNING !! Storing passwords in Git is a bad practice.
+      # ---------------------------------------------------------------
+      auth:
+        username: "myuser"
+        password: "mypassword"
+        erlangCookie: "mysecretcookie"
+
+      # --- Ingress Configuration for RabbitMQ ---
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        hostname: "rabbitmq.dossware.com"
+        annotations:
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+        tls: true
+        # The bitnami chart requires explicit secret creation for TLS
+        extraTls:
+          - hosts:
+              - "rabbitmq.dossware.com"
+            secretName: rabbitmq-dossware-com-tls
+
+---
+
+# ===================================================================
+# == NEW: ELK Stack for Centralized Logging
+# ===================================================================
+
+# =================================================
+# == 6. Elasticsearch Application (Part of ELK)
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: elasticsearch
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://helm.elastic.co
+    chart: elasticsearch
+    targetRevision: 8.5.1 # Use a specific version for stability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging # Deploy ELK stack into its own namespace
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      # Run a single-node cluster, suitable for smaller environments
+      replicas: 1
+      # IMPORTANT: Set Java heap size to avoid using too much memory
+      esJavaOpts: "-Xmx1g -Xms1g"
+      # Enable persistence to store log data
+      persistence:
+        enabled: true
+        storageClassName: "local-path" # K3s default
+        size: 30Gi
+
+---
+
+# =================================================
+# == 7. Kibana Application (Part of ELK)
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kibana
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://helm.elastic.co
+    chart: kibana
+    targetRevision: 8.5.1 # Match the Elasticsearch version
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging # Deploy into the same namespace as Elasticsearch
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      # Point Kibana to the Elasticsearch service
+      elasticsearchHosts: "http://elasticsearch-master.logging.svc.cluster.local:9200"
+      
+      # Configure Ingress to access the Kibana UI
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        annotations:
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+        hosts:
+          - host: "kibana.dossware.com"
+            paths:
+              - path: /
+      tls:
+        - secretName: kibana-dossware-com-tls
+          hosts:
+            - "kibana.dossware.com"
+---
+
+# =================================================
+# == 8. Fluent Bit Application (Log Shipper for ELK)
+# =================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fluent-bit
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: fluent-bit
+    targetRevision: 0.45.1 # Use a specific version for stability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging # Deploy the configuration into the logging namespace
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  helm:
+    values: |
+      # Configure Fluent Bit to send logs to our Elasticsearch instance
+      config:
+        outputs: |
+          [OUTPUT]
+              Name            es
+              Match           *
+              Host            elasticsearch-master.logging.svc.cluster.local
+              Port            9200
+              Logstash_Format On
+              Logstash_Prefix kube
+              Replace_Dots    On
+              Retry_Limit     False
+

@@ -1,0 +1,79 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod" 
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "grafana.dossware.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus-grafana             port:
+              number: 80
+  tls:
+  - hosts:
+    - "grafana.dossware.com"
+    secretName: grafana-dossware-com-tls
+
+---
+
+# Ingress สำหรับ Argo CD
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-ingress
+  namespace: argocd 
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "argocd.dossware.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server 
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - "argocd.dossware.com"
+    secretName: argocd-dossware-com-tls
+
+---
+
+# Ingress สำหรับ RabbitMQ Management UI
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rabbitmq-ingress
+  namespace: data-services 
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "rabbitmq.dossware.com"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: rabbitmq
+            port:
+              number: 15672
+  tls:
+  - hosts:
+    - "rabbitmq.dossware.com"
+    secretName: rabbitmq-dossware-com-tls

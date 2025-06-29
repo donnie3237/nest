@@ -1,4 +1,4 @@
-name: Build, Push Docker and Deploy to Kubernetes
+name: Build, Push Docker & Deploy to K8s
 
 on:
   release:
@@ -13,7 +13,6 @@ jobs:
           - name: gateway
             path: apps/gateway
             image: doseza007/nest-gateway
-            port: 8000
           - name: user
             path: apps/user
             image: doseza007/nest-user
@@ -27,40 +26,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup pnpm & turbo
+        uses: pnpm/action-setup@v3
         with:
-          node-version: '20'
-          # cache: 'pnpm' # <--- ลบบรรทัดนี้ออก!
+          version: 8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
 
-      - name: Enable Corepack & Setup pnpm
-        # ใช้ shell: bash เพื่อให้มั่นใจว่า PATH ถูกจัดการถูกต้อง
-        # และเพื่อให้ pnpm พร้อมใช้งานใน Steps ถัดไป
+      - name: Enable Corepack & pnpm
         run: |
           corepack enable
           corepack prepare pnpm@latest --activate
-          echo "$(pnpm store path)/.pnpm-store" >> $GITHUB_PATH # Add pnpm store to PATH for caching (optional but good for debugging)
-          echo "$(pnpm root -g)" >> $GITHUB_PATH # Add global pnpm bin to PATH
 
-      - name: Install Monorepo Dependencies
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        # Note: If pnpm cache is still desired, you might need a separate step for it
-        # using actions/cache directly, or just rely on pnpm's internal cache if it's fast enough.
-        # However, setup-node's cache with 'pnpm' is designed for this.
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Prune monorepo for ${{ matrix.service.name }}
+        run: pnpm turbo prune ${{ matrix.service.name }} --docker
 
-      - name: Get current date and short SHA for image tag
-        id: build_info
+      - name: Get build info
+        id: info
         run: |
           echo "DATE=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
           echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Build and push ${{ matrix.service.name }} Docker image
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          install: true
+      - name: Build & Push ${{ matrix.service.name }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -69,23 +71,38 @@ jobs:
           tags: |
             ${{ matrix.service.image }}:latest
             ${{ matrix.service.image }}:${{ github.ref_name }}
-            ${{ matrix.service.image }}:${{ steps.build_info.outputs.DATE }}-${{ steps.build_info.outputs.SHA }}
+            ${{ matrix.service.image }}:${{ steps.info.outputs.DATE }}-${{ steps.info.outputs.SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy-to-kubernetes:
     needs: build-and-push
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy Gateway to Kubernetes (using :latest tag)
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+        shell: bash
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
-          username: 'root'
-          password: ${{ secrets.SSH_PASSWORD }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
           script: |
             cd /root/ne
-            kubectl apply -f k8s/deployment.yml
+            kubectl set image deployment/gateway doseza007/nest-gateway:latest -n your-namespace
+            kubectl set image deployment/user doseza007/nest-user:latest -n your-namespace
+            kubectl set image deployment/product doseza007/nest-product:latest -n your-namespace
+            kubectl rollout status deployment/gateway -n your-namespace
+            kubectl rollout status deployment/user -n your-namespace
+            kubectl rollout status deployment/product -n your-namespace
