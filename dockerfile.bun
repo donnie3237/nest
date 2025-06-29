@@ -1,24 +1,24 @@
-# Dockerfile.final
+# Dockerfile.pruned
 
 # --- STAGE 1: Builder ---
-# ใช้ Node base image ที่มี pnpm เพื่อติดตั้งและ build โปรเจกต์อย่างถูกต้อง
+# ใช้ Node base image เพื่อติดตั้ง pnpm และ build โปรเจกต์จาก context ที่ถูก prune แล้ว
 FROM node:18-alpine AS builder
 
 # ติดตั้ง pnpm
 RUN npm install -g pnpm
 
-WORKDIR /usr/src/app
+WORKDIR /app
 ARG PROJECT_NAME
 
-# คัดลอกไฟล์ที่จำเป็นทั้งหมด
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages/ packages/
-COPY apps/ apps/
+# คัดลอกทุกอย่างจาก 'out' directory (build context) เข้ามา
+# ตอนนี้ใน image จะมีโครงสร้างเป็น /app/full, /app/pnpm-lock.yaml ฯลฯ
+COPY . .
 
-# pnpm จะติดตั้ง dependency ของโปรเจกต์เป้าหมายและ dependency ย่อยๆ ทั้งหมด
-RUN pnpm install --filter=${PROJECT_NAME}...
+# ติดตั้ง dependency ทั้งหมดที่จำเป็นจาก pnpm-lock.yaml
+# pnpm จะอ่าน pnpm-workspace.yaml และติดตั้งเฉพาะส่วนที่อยู่ใน /app/full
+RUN pnpm install --frozen-lockfile
 
-# pnpm run จะจัดการ PATH ของ nest command ให้ถูกต้องเสมอ
+# Build โปรเจกต์เป้าหมาย (pnpm จะหาเจอเพราะเราติดตั้งทุกอย่างแล้ว)
 RUN pnpm run --filter=${PROJECT_NAME} build
 
 # ลบ devDependencies ออกเพื่อลดขนาด node_modules
@@ -26,7 +26,7 @@ RUN pnpm prune --prod --filter=${PROJECT_NAME}...
 
 
 # --- STAGE 2: Final Runner ---
-# สลับมาใช้ Bun image เพื่อรันโปรแกรมที่ build เสร็จแล้ว
+# สลับมาใช้ Bun image เพื่อรันโปรแกรม
 FROM oven/bun:1-alpine AS final
 
 ARG PROJECT_PATH
@@ -36,11 +36,10 @@ WORKDIR /usr/src/app
 USER bun
 
 # คัดลอกไฟล์ที่จำเป็นจาก Stage Builder
-COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT_PATH}/dist ./dist
-COPY --from=builder --chown=bun:bun /usr/src/app/node_modules ./node_modules
-# คัดลอก package.json ของ service ที่ build เพื่อให้ bun run ทำงานได้
-COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT_PATH}/package.json ./package.json
-
+# **สังเกตว่า PATH ตอนนี้มี 'full/' นำหน้า** เพราะเรา COPY มาแบบนั้น
+COPY --from=builder --chown=bun:bun /app/full/apps/${PROJECT_PATH}/dist ./dist
+COPY --from=builder --chown=bun:bun /app/node_modules ./node_modules
+COPY --from=builder --chown=bun:bun /app/full/apps/${PROJECT_PATH}/package.json ./package.json
 
 ENV NODE_ENV=production
 
