@@ -13,10 +13,10 @@ jobs:
           - name: gateway
             path: apps/gateway
             image: doseza007/nest-gateway
-          - name: user
+          - name: user-service
             path: apps/user
             image: doseza007/nest-user
-          - name: product
+          - name: product-service
             path: apps/product
             image: doseza007/nest-product
 
