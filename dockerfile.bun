@@ -15,24 +15,30 @@ RUN bun install
 FROM dependencies AS builder
 ARG PROJECT_NAME
 
-# เพิ่ม PATH ของ node_modules/.bin ด้วย Syntax ที่ถูกต้อง (key=value)
-ENV PATH="/usr/src/app/node_modules/.bin:$PATH"
+# ---- THE FIX IS HERE ----
+# บังคับให้ใช้ PATH ที่ถูกต้องนำหน้าคำสั่ง RUN โดยตรง
+RUN PATH="/usr/src/app/node_modules/.bin:$PATH" bun run --filter=${PROJECT_NAME} build
 
-RUN bun run --filter=${PROJECT_NAME} build
-
-# 4. Final Runner Stage: สร้าง Image สุดท้าย
+# 4. Final Runner Stage: สร้าง Image สุดท้ายที่เล็กและปลอดภัย
 FROM base AS final
-ARG PROJECT_NAME
 ARG PROJECT_PATH
 WORKDIR /usr/src/app
 
-# สลับไปใช้ user 'bun'
+# สลับไปใช้ user 'bun' ที่มีมาให้แล้ว
 USER bun
 
-# คัดลอก Build output และ Production dependencies ที่จำเป็น
-COPY --from=builder --chown=bun:bun /usr/src/app/node_modules ./node_modules
+# คัดลอกไฟล์ที่จำเป็นเพื่อติดตั้งเฉพาะ Production Dependencies
+COPY --from=dependencies --chown=bun:bun package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --from=dependencies --chown=bun:bun packages/ packages/
+COPY --from=dependencies --chown=bun:bun apps/ apps/
+
+# ติดตั้งเฉพาะ Production Dependencies เท่านั้น
+RUN bun install --production
+
+# คัดลอกเฉพาะ Build output จาก builder stage
 COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT_PATH}/dist ./dist
 
 ENV NODE_ENV=production
 
+# รันโปรแกรม
 CMD ["bun", "run", "dist/main.js"]
