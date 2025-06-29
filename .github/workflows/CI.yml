@@ -1,5 +1,5 @@
 # .github/workflows/deploy.yml
-name: Build, Push Docker (Bun) & Deploy to K8s
+name: Build, Push Docker (Hybrid) & Deploy to K8s
 
 on:
   release:
@@ -11,8 +11,6 @@ jobs:
     strategy:
       matrix:
         service:
-          # name คือชื่อใน package.json (สำหรับ --filter)
-          # path คือชื่อ directory (สำหรับหา dist)
           - name: 'gateway'
             path: 'gateway'
             image: 'doseza007/nest-gateway'
@@ -45,15 +43,12 @@ jobs:
           echo "DATE=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
           echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Build and push with Bun
+      - name: Build and push with Hybrid (pnpm+bun)
         uses: docker/build-push-action@v5
         with:
-          # context คือ root ของโปรเจกต์
           context: .
-          # ใช้ Dockerfile.bun ที่เราสร้างขึ้นใหม่
-          file: ./dockerfile.bun
+          file: ./Dockerfile.final
           push: true
-          # ส่งตัวแปรเข้าไปใน Dockerfile
           build-args: |
             PROJECT_NAME=${{ matrix.service.name }}
             PROJECT_PATH=${{ matrix.service.path }}
