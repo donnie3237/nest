@@ -1,38 +1,43 @@
-# 1. Base image + pnpm & turbo global
-FROM node:18-alpine AS base
-RUN apk add --no-cache libc6-compat \
-  && corepack enable \
-  && corepack prepare pnpm@latest --activate \
-  && pnpm install turbo --global
-WORKDIR /app
+# 1. Base Stage: ใช้ base image ของ Bun
+# oven/bun:1-alpine หมายถึง Bun v1.x ล่าสุดบน Alpine (แนะนำ)
+# หากต้องการเวอร์ชันล่าสุดเสมอ สามารถเปลี่ยนเป็น oven/bun:latest-alpine ได้
+FROM oven/bun:1-alpine AS base
+WORKDIR /usr/src/app
 
-# 2. Prune monorepo for specific project
-FROM base AS pruner
-ARG PROJECT
-COPY . .
-RUN turbo prune --scope=${PROJECT} --docker   # ปรับ prune ให้เป็น docker build filter :contentReference[oaicite:1]{index=1}
-
-# 3. Installer stage
+# 2. Installer Stage: ติดตั้ง Dependencies ทั้งหมด
 FROM base AS installer
 ARG PROJECT
-WORKDIR /app
-COPY --from=pruner /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
-COPY --from=pruner /app/out/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=pruner /app/out/json/ .
-RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile   :contentReference[oaicite:2]{index=2}
 
-COPY --from=pruner /app/out/full/ .
-RUN pnpm run build --filter=${PROJECT}        :contentReference[oaicite:3]{index=3}
-# Optionally prune devdeps
-RUN pnpm prune --prod
+# คัดลอกไฟล์ที่จำเป็นสำหรับการติดตั้ง dependency
+COPY package.json bun.lockb* tsconfig.json ./
+COPY apps/ apps/
+COPY packages/ packages/
 
-# 4. Runner stage
-FROM node:18-alpine AS runner
-RUN apk add --no-cache libc6-compat \
-  && addgroup -S --gid 1001 nodejs \
-  && adduser -S --uid 1001 nodejs
-USER nodejs
-WORKDIR /app
-COPY --from=installer --chown=nodejs:nodejs /app .
+# ติดตั้ง dependency ทั้งหมดสำหรับ monorepo
+RUN bun install --frozen-lockfile
+
+# 3. Builder Stage: Build โปรเจกต์เป้าหมาย
+FROM installer AS builder
+ARG PROJECT
+
+# รัน build script สำหรับโปรเจกต์ที่ระบุ
+# Bun ไม่มี --filter แต่เราใช้ --cwd เพื่อระบุ workspace ที่จะรันคำสั่งแทน
+RUN bun run --cwd ./apps/${PROJECT} build
+
+# 4. Runner Stage: สร้าง Final image ที่เล็กและพร้อมใช้งาน
+FROM base AS runner
+ARG PROJECT
+WORKDIR /usr/src/app
+
+# สร้าง user สำหรับรันโปรแกรมเพื่อความปลอดภัย
+RUN addgroup -S --gid 1001 bun
+RUN adduser -S --uid 1001 bun
+USER bun
+
+# คัดลอกเฉพาะ build output จาก builder stage
+COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT}/dist ./dist
+
 ENV NODE_ENV=production
-CMD ["node", "dist/apps/${PROJECT}/main.js"]
+
+# ใช้ bun run โดยตรงกับไฟล์ผลลัพธ์
+CMD ["bun", "run", "dist/main.js"]
