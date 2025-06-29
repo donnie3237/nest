@@ -15,8 +15,8 @@ RUN bun install
 FROM dependencies AS builder
 ARG PROJECT_NAME
 
-# เพิ่ม PATH ของ node_modules/.bin เพื่อให้หา command 'nest' เจอ
-ENV PATH /usr/src/app/node_modules/.bin:$PATH
+# เพิ่ม PATH ของ node_modules/.bin ด้วย Syntax ที่ถูกต้อง (key=value)
+ENV PATH="/usr/src/app/node_modules/.bin:$PATH"
 
 RUN bun run --filter=${PROJECT_NAME} build
 
@@ -29,20 +29,9 @@ WORKDIR /usr/src/app
 # สลับไปใช้ user 'bun'
 USER bun
 
-# คัดลอกเฉพาะ Build output จาก builder stage
+# คัดลอก Build output และ Production dependencies ที่จำเป็น
+COPY --from=builder --chown=bun:bun /usr/src/app/node_modules ./node_modules
 COPY --from=builder --chown=bun:bun /usr/src/app/apps/${PROJECT_PATH}/dist ./dist
-
-# คัดลอก package.json และ node_modules ที่จำเป็นสำหรับ Production
-COPY --from=builder --chown=bun:bun /usr/src/app/package.json .
-COPY --from=builder --chown=bun:bun /usr/src/app/pnpm-lock.yaml .
-COPY --from=builder --chown=bun:bun /usr/src/app/pnpm-workspace.yaml .
-COPY --from=builder --chown=bun:bun /usr/src/app/apps/ apps/
-COPY --from=builder --chown=bun:bun /usr/src/app/packages/ packages/
-COPY --from=builder --chown=bun:bun /usr/src/app/node_modules/ ./node_modules/
-
-# ติดตั้งเฉพาะ Production Dependencies ใน image สุดท้าย (ถ้าต้องการ)
-# หรือใช้ node_modules จาก builder stage โดยตรงก็ได้
-# RUN bun install --production
 
 ENV NODE_ENV=production
 
