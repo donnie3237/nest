@@ -30,8 +30,6 @@ ARG PROJECT_PATH
 WORKDIR /usr/src/app
 
 # สร้าง user สำหรับรันโปรแกรมเพื่อความปลอดภัย
-RUN addgroup -S --gid 1001 bun
-RUN adduser -S --uid 1001 bun
 USER bun
 
 # คัดลอก Build output และ Production dependencies ที่จำเป็น
