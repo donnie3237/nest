@@ -43,7 +43,7 @@ jobs:
         run: pnpm turbo prune ${{ matrix.service.name }} --docker
 
       - name: Copy custom Dockerfile to pruned output
-        run: cp Dockerfile.bun out/Dockerfile
+        run: cp dockerfile.bun out/Dockerfile
 
       - name: Get build info
         id: info
