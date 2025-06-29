@@ -13,32 +13,31 @@ jobs:
           - name: gateway
             path: apps/gateway
             image: doseza007/nest-gateway
+            deployment: gateway # ชื่อ deployment ใน Kubernetes
           - name: user-service
             path: apps/user
             image: doseza007/nest-user
+            deployment: user # ชื่อ deployment ใน Kubernetes
           - name: product-service
             path: apps/product
             image: doseza007/nest-product
-
+            deployment: product # ชื่อ deployment ใน Kubernetes
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup pnpm & turbo
+      - name: Setup pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 8
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
-
-      - name: Enable Corepack & pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -52,6 +51,14 @@ jobs:
           echo "DATE=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
           echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+      # --- ส่วนที่เพิ่มเข้ามาเพื่อแก้ปัญหา Cache ---
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      # -------------------------------------------
+
       - name: Docker login
         uses: docker/login-action@v3
         with:
@@ -59,10 +66,13 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build & Push ${{ matrix.service.name }}
+        id: build
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ${{ matrix.service.path }}/Dockerfile
+          # --- แก้ไข Context ให้ชี้ไปที่ directory ที่ prune แล้ว ---
+          context: ./out
+          # ----------------------------------------------------
+          file: ./out/apps/${{ matrix.service.name }}/Dockerfile
           push: true
           tags: |
             ${{ matrix.service.image }}:latest
@@ -72,22 +82,11 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy-to-kubernetes:
+    # --- ทำให้ deploy ทำงานหลังจาก build-and-push สำเร็จ ---
     needs: build-and-push
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
-        shell: bash
-
-      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -95,10 +94,16 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
-            cd /root/ne
-            kubectl set image deployment/gateway doseza007/nest-gateway:latest -n your-namespace
-            kubectl set image deployment/user doseza007/nest-user:latest -n your-namespace
-            kubectl set image deployment/product doseza007/nest-product:latest -n your-namespace
-            kubectl rollout status deployment/gateway -n your-namespace
-            kubectl rollout status deployment/user -n your-namespace
-            kubectl rollout status deployment/product -n your-namespace
+            echo "--- Deploying all services with new release tag: ${{ github.ref_name }} ---"
+            
+            # --- ทำให้การ deploy เป็นแบบ Dynamic ---
+            kubectl set image deployment/gateway gateway=${{ secrets.DOCKER_USERNAME }}/nest-gateway:${{ github.ref_name }} --namespace your-namespace
+            kubectl set image deployment/user user=${{ secrets.DOCKER_USERNAME }}/nest-user:${{ github.ref_name }} --namespace your-namespace
+            kubectl set image deployment/product product=${{ secrets.DOCKER_USERNAME }}/nest-product:${{ github.ref_name }} --namespace your-namespace
+
+            echo "--- Waiting for rollout to complete ---"
+            kubectl rollout status deployment/gateway --namespace your-namespace
+            kubectl rollout status deployment/user --namespace your-namespace
+            kubectl rollout status deployment/product --namespace your-namespace
+
+            echo "--- Deployment finished successfully! ---"
