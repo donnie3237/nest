@@ -11,7 +11,6 @@ jobs:
     strategy:
       matrix:
         service:
-          # name คือชื่อใน package.json, path คือชื่อ directory
           - name: 'gateway'
             path: 'gateway'
             image: 'doseza007/nest-gateway'
@@ -44,16 +43,6 @@ jobs:
 
       - name: Prune monorepo for ${{ matrix.service.name }}
         run: pnpm turbo prune ${{ matrix.service.name }} --docker
-
-      # --- ขั้นตอนสำคัญสำหรับ Debug ---
-      # เราต้องการ Log จากขั้นตอนนี้เพื่อวิเคราะห์ปัญหาต่อไป
-      - name: 🧐 Inspect 'out' directory
-        run: |
-          echo "--- Listing contents of 'out' directory recursively ---"
-          ls -R out
-          echo "--- Displaying content of ./out/Dockerfile ---"
-          cat ./out/Dockerfile || echo "Dockerfile not found or is empty!"
-      # ------------------------------------
 
       - name: Get build info
         id: info
@@ -100,7 +89,6 @@ jobs:
           script: |
             echo "--- Deploying all services with new release tag: ${{ github.ref_name }} ---"
             
-            # กรุณาเปลี่ยนชื่อ container (เช่น gateway=, user=) ให้ตรงกับ deployment.yaml ของคุณ
             kubectl set image deployment/gateway gateway=doseza007/nest-gateway:${{ github.ref_name }} --namespace your-namespace
             kubectl set image deployment/user user=doseza007/nest-user:${{ github.ref_name }} --namespace your-namespace
             kubectl set image deployment/product product=doseza007/nest-product:${{ github.ref_name }} --namespace your-namespace
